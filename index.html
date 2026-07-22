@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cine Roleta · Top 250 IMDb</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="marquee-lights">
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+  <h1>CINE <span>ROLETA</span></h1>
+  <p>Sorteie um dos 250 melhores filmes do IMDb e comece a maratona</p>
+</header>
+
+<div class="update-banner" id="update-banner" hidden>
+  <span id="update-banner-text"></span>
+  <button id="update-banner-close" aria-label="Fechar aviso">×</button>
+</div>
+
+<main>
+
+  <div class="progress-wrap">
+    <div class="progress-label">
+      <span>SUA JORNADA</span>
+      <span><b id="progress-count">0/250</b> assistidos · <b id="progress-percent">0%</b></span>
+    </div>
+    <div class="filmstrip">
+      <div class="filmstrip-fill" id="filmstrip-fill"></div>
+    </div>
+  </div>
+
+  <section class="roulette">
+    <div class="roulette-eyebrow">Gire e descubra seu próximo filme</div>
+    <div class="reels" id="reels">
+      <div class="reel"><div class="reel-strip" id="reel-0"></div></div>
+      <div class="reel"><div class="reel-strip" id="reel-1"></div></div>
+      <div class="reel"><div class="reel-strip" id="reel-2"></div></div>
+    </div>
+    <div class="spin-row">
+      <button class="spin-btn" id="spin-btn">GIRAR A ROLETA</button>
+      <label class="toggle-pending">
+        <input type="checkbox" id="only-pending" checked>
+        sortear só entre os pendentes
+      </label>
+    </div>
+    <div class="completion-lock" id="completion-lock" hidden>
+      🏆 Você completou a maratona dos 250 filmes!
+      <button class="reset-btn" id="lock-reset-btn">Zerar progresso e começar de novo</button>
+    </div>
+  </section>
+
+  <div class="ticket-zone">
+    <p class="placeholder-msg" id="placeholder-msg">Aperte "girar" para sortear seu primeiro filme 🎬</p>
+    <article class="ticket" id="ticket">
+      <div class="ticket-poster"><img id="mv-poster" src="" alt=""></div>
+      <div class="divider"></div>
+      <div class="ticket-info">
+        <div class="stamp" id="mv-stamp">ASSISTIDO</div>
+        <div class="ticket-topline">
+          <span class="rank-badge" id="mv-rank">#0</span>
+          <span class="rating-badge">
+            <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
+            <span id="mv-rating">0.0</span>
+          </span>
+          <span class="cert-badge" id="mv-cert">—</span>
+        </div>
+        <h2 class="ticket-title" id="mv-title">—</h2>
+        <div class="chips" id="mv-genres"></div>
+        <div class="meta-line"><b>Direção:</b> <span id="mv-director">—</span></div>
+        <div class="meta-line"><b>Elenco:</b> <span id="mv-cast">—</span></div>
+        <div class="meta-line"><b>Duração:</b> <span id="mv-runtime">—</span></div>
+        <div class="meta-line"><b>Ano:</b> <span id="mv-year">—</span></div>
+        <p class="plot" id="mv-plot"></p>
+        <div class="ticket-actions">
+          <button class="watch-btn" id="watch-btn">Marcar como assistido</button>
+          <a class="imdb-link" id="mv-link" href="#" target="_blank" rel="noopener">ver no IMDb ↗</a>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <section class="list-section">
+    <button class="list-toggle" id="list-toggle">
+      <span>VER LISTA COMPLETA · 250 FILMES</span>
+      <span class="arrow">▾</span>
+    </button>
+    <div class="list-body" id="list-body">
+      <div class="list-controls">
+        <input type="text" class="search-input" id="search-input" placeholder="Buscar por título ou nº do ranking...">
+        <div class="filter-btns">
+          <button class="filter-btn active" data-filter="all">Todos</button>
+          <button class="filter-btn" data-filter="watched">Assistidos</button>
+          <button class="filter-btn" data-filter="pending">Pendentes</button>
+        </div>
+        <button class="reset-btn" id="reset-btn">Zerar progresso</button>
+      </div>
+      <div class="grid" id="grid"></div>
+      <p class="empty-state" id="empty-state" style="display:none;">Nenhum filme encontrado.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>Dados do IMDb Top 250 · uso pessoal e offline · progresso salvo neste navegador</footer>
+
+<div class="modal-overlay" id="completion-modal" hidden>
+  <div class="modal-card">
+    <div class="modal-emoji">🏆</div>
+    <h2>Maratona Completa!</h2>
+    <p>Você assistiu aos 250 filmes do Top IMDb. Um verdadeiro cinéfilo — parabéns pela dedicação!</p>
+    <div class="modal-actions">
+      <button class="reset-btn-solid" id="modal-reset-btn">Zerar progresso e começar de novo</button>
+      <button class="watch-btn" id="modal-close-btn">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
