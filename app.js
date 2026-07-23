@@ -51,13 +51,44 @@ function normalizeTitle(s){
   return (s || '').trim().toLowerCase();
 }
 
+// Alguns navegadores/fontes exibem o apóstrofo reto (') de forma estranha
+// em certos estilos de texto. Trocamos pelo apóstrofo tipográfico (’),
+// que tem suporte muito mais consistente em qualquer fonte.
+function smartQuotes(text){
+  return (text || '').replace(/'/g, '\u2019');
+}
+
 // Título original + título brasileiro entre parênteses (quando existir e for diferente)
 function displayTitle(movie){
-  const br = (movie.title_br || '').trim();
+  const original = smartQuotes(movie.title);
+  const br = smartQuotes((movie.title_br || '').trim());
   if(br && normalizeTitle(br) !== normalizeTitle(movie.title)){
-    return `${movie.title} (${br})`;
+    return `${original} (${br})`;
   }
-  return movie.title;
+  return original;
+}
+
+// Carrega o pôster de forma segura: primeiro tenta em modo CORS (necessário
+// para poder inspecionar os pixels e recortar faixas sólidas indesejadas).
+// Se o servidor da imagem não permitir isso, cai de volta pro carregamento
+// normal — o pôster continua aparecendo, só sem o recorte automático.
+function loadPosterImage(movie){
+  const posterEl = document.getElementById('mv-poster');
+  posterEl.onload = null;
+  posterEl.onerror = null;
+  posterEl.alt = movie.title;
+
+  const tester = new Image();
+  tester.crossOrigin = 'anonymous';
+  tester.onload = () => {
+    posterEl.src = tester.src;
+    posterEl.onload = () => autoCropPoster(posterEl);
+  };
+  tester.onerror = () => {
+    posterEl.removeAttribute('crossorigin');
+    posterEl.src = movie.poster;
+  };
+  tester.src = movie.poster;
 }
 
 function formatRuntime(min){
@@ -65,6 +96,69 @@ function formatRuntime(min){
   const h = Math.floor(min/60);
   const m = min % 60;
   return h > 0 ? `${h}h ${m>0? m+'min':''}`.trim() : `${m}min`;
+}
+
+// Alguns pôsteres vêm com uma faixa sólida (preta/branca) na parte de baixo
+// já dentro do próprio arquivo de imagem. Aqui detectamos e recortamos essa
+// faixa automaticamente, comparando as bordas superior/inferior com o centro.
+function autoCropPoster(imgEl){
+  try{
+    const w = imgEl.naturalWidth;
+    const h = imgEl.naturalHeight;
+    if(!w || !h) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, w, h);
+
+    let data;
+    try{
+      data = ctx.getImageData(0, 0, w, h).data;
+    }catch(e){
+      return; // canvas "tainted" por CORS — não dá pra inspecionar os pixels
+    }
+
+    function rowColor(y){
+      const idx = (y*w + Math.floor(w/2)) * 4;
+      return [data[idx], data[idx+1], data[idx+2]];
+    }
+
+    function isRowUniform(y){
+      const step = Math.max(1, Math.floor(w/60));
+      const idx0 = (y*w) * 4;
+      const r0 = data[idx0], g0 = data[idx0+1], b0 = data[idx0+2];
+      for(let x=0; x<w; x+=step){
+        const idx = (y*w + x) * 4;
+        if(Math.abs(data[idx]-r0) > 12 || Math.abs(data[idx+1]-g0) > 12 || Math.abs(data[idx+2]-b0) > 12){
+          return false;
+        }
+      }
+      return true;
+    }
+
+    const maxTrim = Math.floor(h * 0.18); // nunca recorta mais que ~18% de cada lado
+    let top = 0;
+    while(top < maxTrim && isRowUniform(top)) top++;
+    let bottom = h - 1;
+    let trimmedBottom = 0;
+    while(trimmedBottom < maxTrim && isRowUniform(bottom)){ bottom--; trimmedBottom++; }
+
+    if(top === 0 && trimmedBottom === 0) return; // nada pra recortar
+
+    const newH = bottom - top + 1;
+    if(newH < h * 0.6) return; // segurança: nunca recorta demais
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = w;
+    outCanvas.height = newH;
+    const outCtx = outCanvas.getContext('2d');
+    outCtx.drawImage(canvas, 0, top, w, newH, 0, 0, w, newH);
+    imgEl.src = outCanvas.toDataURL('image/jpeg', 0.94);
+  }catch(e){
+    console.warn('Não foi possível analisar o pôster para recorte automático.', e);
+  }
 }
 
 function rebuildIndexes(){
@@ -92,24 +186,37 @@ function enrichWithTranslation(movie, map){
   return movie;
 }
 
+// A fonte externa (usada na verificação de atualizações) traz o texto bruto,
+// às vezes com entidades HTML não decodificadas (ex: "d&apos;Amélie").
+function decodeHtmlEntities(text){
+  if(!text) return '';
+  return text
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
 // Converte um item cru vindo da fonte externa para o formato interno do app
 function transformLiveEntry(raw){
   const ttId = extractTt(raw.link);
   const genres = (raw.genres || '').split(',').map(s => s.trim()).filter(Boolean);
-  const cast = (raw.topCast || '').split(',').map(s => s.trim()).filter(Boolean).slice(0,4);
+  const cast = (raw.topCast || '').split(',').map(s => decodeHtmlEntities(s.trim())).filter(Boolean).slice(0,4);
   return {
     rank: raw.Rank,
     ttId,
-    title: (raw.name || '').trim(),
+    title: decodeHtmlEntities((raw.name || '').trim()),
     title_br: '',
     rating: Number(raw['IMDb Rating']) || 0,
     poster: raw.image || '',
     genres,
-    director: (raw.directors || '').trim() || 'Não creditado',
+    director: decodeHtmlEntities((raw.directors || '').trim()) || 'Não creditado',
     cast,
     runtime: raw.runtime || 0,
     certificate: (raw.certificate || '').trim() || '—',
-    plot: trimPlot((raw.plot || '').trim()),
+    plot: trimPlot(decodeHtmlEntities((raw.plot || '').trim())),
     year: null,
     link: raw.link || ''
   };
@@ -369,17 +476,16 @@ function renderMovie(movie){
   const ticket = document.getElementById('ticket');
   ticket.classList.add('visible');
 
-  document.getElementById('mv-poster').src = movie.poster;
-  document.getElementById('mv-poster').alt = movie.title;
+  loadPosterImage(movie);
   document.getElementById('mv-rank').textContent = '#' + movie.rank;
   document.getElementById('mv-rating').textContent = (movie.rating || 0).toFixed(1);
   document.getElementById('mv-cert').textContent = movie.certificate;
   document.getElementById('mv-title').textContent = displayTitle(movie);
-  document.getElementById('mv-director').textContent = movie.director;
-  document.getElementById('mv-cast').textContent = movie.cast.join(', ') || 'não informado';
+  document.getElementById('mv-director').textContent = smartQuotes(movie.director);
+  document.getElementById('mv-cast').textContent = smartQuotes(movie.cast.join(', ')) || 'não informado';
   document.getElementById('mv-runtime').textContent = formatRuntime(movie.runtime);
   document.getElementById('mv-year').textContent = movie.year || 'não informado';
-  document.getElementById('mv-plot').textContent = movie.plot;
+  document.getElementById('mv-plot').textContent = smartQuotes(movie.plot);
   document.getElementById('mv-link').href = movie.link || '#';
 
   const chipsEl = document.getElementById('mv-genres');
