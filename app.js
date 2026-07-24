@@ -261,7 +261,10 @@ async function loadBaseMovies(){
 }
 
 // Verifica, em segundo plano, se surgiu algum filme novo na fonte que
-// espelha o Top 250 do IMDb. Se encontrar, atualiza a lista e avisa.
+// espelha o Top 250 do IMDb. Se encontrar, ADICIONA esse(s) filme(s) à
+// lista — os filmes que já temos curados nunca são alterados por aqui,
+// justamente pra evitar que um campo vazio na fonte externa (como já
+// aconteceu com a direção de "Cidade de Deus") apague um dado correto.
 async function checkForImdbUpdates(){
   try{
     const controller = new AbortController();
@@ -273,42 +276,41 @@ async function checkForImdbUpdates(){
     const raw = await res.json();
     if(!Array.isArray(raw) || raw.length === 0) return;
 
-    const liveMovies = raw
-      .map(transformLiveEntry)
-      .filter(m => m.ttId)
-      .map(m => enrichWithTranslation(m, translationsByTt))
-      .sort((a,b) => a.rank - b.rank);
-
-    const liveIds = liveMovies.map(m => m.ttId);
+    const liveIds = raw.map(r => extractTt(r.link)).filter(Boolean);
     const knownRaw = localStorage.getItem(STORAGE_KNOWN_IDS);
 
     if(knownRaw === null){
-      // Primeira verificação: só grava a base atual, sem avisar nada.
+      // Primeira verificação: só grava a base atual, sem mexer na lista.
       localStorage.setItem(STORAGE_KNOWN_IDS, JSON.stringify(liveIds));
-      MOVIES = liveMovies;
-      rebuildIndexes();
-      buildGrid();
-      refreshAllGridStates();
-      applyListFilter();
-      updateProgress();
       return;
     }
 
-    const known = new Set(JSON.parse(knownRaw));
-    const newOnes = liveMovies.filter(m => !known.has(m.ttId));
+    const currentIds = new Set(Object.keys(byTt));
+    const newRawEntries = raw.filter(r => {
+      const tt = extractTt(r.link);
+      return tt && !currentIds.has(tt);
+    });
 
-    MOVIES = liveMovies;
-    rebuildIndexes();
-    buildGrid();
-    refreshAllGridStates();
-    applyListFilter();
-    updateProgress();
+    if(newRawEntries.length > 0){
+      const newMovies = newRawEntries
+        .map(transformLiveEntry)
+        .filter(m => m.ttId && !byTt[m.ttId]);
+
+      if(newMovies.length > 0){
+        let nextRank = MOVIES.length + 1;
+        newMovies.forEach(m => { m.rank = nextRank++; });
+
+        MOVIES = MOVIES.concat(newMovies);
+        rebuildIndexes();
+        buildGrid();
+        refreshAllGridStates();
+        applyListFilter();
+        updateProgress();
+        showUpdateBanner(newMovies);
+      }
+    }
 
     localStorage.setItem(STORAGE_KNOWN_IDS, JSON.stringify(liveIds));
-
-    if(newOnes.length > 0){
-      showUpdateBanner(newOnes);
-    }
   }catch(e){
     // Sem internet, bloqueado por CORS (comum ao abrir o arquivo direto)
     // ou a fonte está fora do ar. O app segue normalmente com os dados atuais.
@@ -684,7 +686,6 @@ function wireEvents(){
 // ---------------------------------------------------------------------
 async function init(){
   MOVIES = await loadBaseMovies();
-  translationsByTt = buildTranslations(MOVIES);
   rebuildIndexes();
 
   migrateOldWatchedIfNeeded();
