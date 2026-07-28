@@ -4,8 +4,9 @@
 
 // >>> PREENCHA AQUI com os dados do seu projeto Supabase <<<
 // (Supabase Dashboard > Project Settings > API)
-const SUPABASE_URL = 'COLE_A_URL_DO_SEU_PROJETO_AQUI';
-const SUPABASE_ANON_KEY = 'COLE_SUA_CHAVE_ANON_AQUI';
+const SUPABASE_URL = 'https://honsugmrdnztbzovzznt.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvbnN1Z21yZG56dGJ6b3Z6em50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NTQ3MDMsImV4cCI6MjEwMDQzMDcwM30.IDne76P9KOMEfUJWsjGUR-4lKdfkJwW3RxpcfxoQ4Z8';
+
 
 const supabaseClient = (window.supabase && !SUPABASE_URL.startsWith('COLE_'))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
