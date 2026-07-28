@@ -260,11 +260,10 @@ async function loadBaseMovies(){
   return FALLBACK_MOVIES;
 }
 
-// Verifica, em segundo plano, se surgiu algum filme novo na fonte que
-// espelha o Top 250 do IMDb. Se encontrar, ADICIONA esse(s) filme(s) à
-// lista — os filmes que já temos curados nunca são alterados por aqui,
-// justamente pra evitar que um campo vazio na fonte externa (como já
-// aconteceu com a direção de "Cidade de Deus") apague um dado correto.
+// Verifica, em segundo plano, se a lista Top 250 do IMDb mudou: adiciona
+// filme(s) novo(s) e REMOVE os que saíram da lista, mantendo o total em
+// 250. Os filmes que continuam na lista nunca têm seus dados curados
+// alterados por aqui — só a posição (rank) é re-sincronizada.
 async function checkForImdbUpdates(){
   try{
     const controller = new AbortController();
@@ -276,9 +275,15 @@ async function checkForImdbUpdates(){
     const raw = await res.json();
     if(!Array.isArray(raw) || raw.length === 0) return;
 
-    const liveIds = raw.map(r => extractTt(r.link)).filter(Boolean);
-    const knownRaw = localStorage.getItem(STORAGE_KNOWN_IDS);
+    const liveEntries = raw
+      .map(r => ({ raw: r, ttId: extractTt(r.link) }))
+      .filter(e => e.ttId);
+    const liveIds = liveEntries.map(e => e.ttId);
+    const liveIdSet = new Set(liveIds);
+    const rankByTt = {};
+    liveEntries.forEach(e => { rankByTt[e.ttId] = e.raw.Rank; });
 
+    const knownRaw = localStorage.getItem(STORAGE_KNOWN_IDS);
     if(knownRaw === null){
       // Primeira verificação: só grava a base atual, sem mexer na lista.
       localStorage.setItem(STORAGE_KNOWN_IDS, JSON.stringify(liveIds));
@@ -286,31 +291,42 @@ async function checkForImdbUpdates(){
     }
 
     const currentIds = new Set(Object.keys(byTt));
-    const newRawEntries = raw.filter(r => {
-      const tt = extractTt(r.link);
-      return tt && !currentIds.has(tt);
-    });
+    const removedIds = [...currentIds].filter(id => !liveIdSet.has(id));
+    const newEntries = liveEntries.filter(e => !currentIds.has(e.ttId));
 
-    if(newRawEntries.length > 0){
-      const newMovies = newRawEntries
-        .map(transformLiveEntry)
-        .filter(m => m.ttId && !byTt[m.ttId]);
+    const removedMovies = MOVIES.filter(m => removedIds.includes(m.ttId));
+    const newMovies = newEntries
+      .map(e => transformLiveEntry(e.raw))
+      .filter(m => m.ttId);
 
-      if(newMovies.length > 0){
-        let nextRank = MOVIES.length + 1;
-        newMovies.forEach(m => { m.rank = nextRank++; });
-
-        MOVIES = MOVIES.concat(newMovies);
-        rebuildIndexes();
-        buildGrid();
-        refreshAllGridStates();
-        applyListFilter();
-        updateProgress();
-        showUpdateBanner(newMovies);
-      }
+    if(removedMovies.length === 0 && newMovies.length === 0){
+      localStorage.setItem(STORAGE_KNOWN_IDS, JSON.stringify(liveIds));
+      return;
     }
 
+    if(removedMovies.length > 0){
+      const removedSet = new Set(removedIds);
+      MOVIES = MOVIES.filter(m => !removedSet.has(m.ttId));
+    }
+    if(newMovies.length > 0){
+      MOVIES = MOVIES.concat(newMovies);
+    }
+
+    // Re-sincroniza a posição (rank) de todo mundo com a ordem atual do
+    // IMDb, sem tocar em nenhum outro campo curado.
+    MOVIES.forEach(m => {
+      if(rankByTt[m.ttId] != null) m.rank = rankByTt[m.ttId];
+    });
+    MOVIES.sort((a,b) => a.rank - b.rank);
+
+    rebuildIndexes();
+    buildGrid();
+    refreshAllGridStates();
+    applyListFilter();
+    updateProgress();
+
     localStorage.setItem(STORAGE_KNOWN_IDS, JSON.stringify(liveIds));
+    showUpdateBanner(newMovies, removedMovies);
   }catch(e){
     // Sem internet, bloqueado por CORS (comum ao abrir o arquivo direto)
     // ou a fonte está fora do ar. O app segue normalmente com os dados atuais.
@@ -318,12 +334,23 @@ async function checkForImdbUpdates(){
   }
 }
 
-function showUpdateBanner(newOnes){
+function showUpdateBanner(newMovies, removedMovies){
   const banner = document.getElementById('update-banner');
   const text = document.getElementById('update-banner-text');
-  const names = newOnes.slice(0,3).map(m => displayTitle(m)).join(', ');
-  const extra = newOnes.length > 3 ? ` e mais ${newOnes.length - 3}` : '';
-  text.textContent = `🎬 ${newOnes.length} filme(s) novo(s) entraram no Top 250 do IMDb: ${names}${extra}. A lista foi atualizada.`;
+  const parts = [];
+
+  if(newMovies.length > 0){
+    const names = newMovies.slice(0,2).map(m => displayTitle(m)).join(', ');
+    const extra = newMovies.length > 2 ? ` e mais ${newMovies.length - 2}` : '';
+    parts.push(`🎬 entrou no Top 250: ${names}${extra}`);
+  }
+  if(removedMovies.length > 0){
+    const names = removedMovies.slice(0,2).map(m => displayTitle(m)).join(', ');
+    const extra = removedMovies.length > 2 ? ` e mais ${removedMovies.length - 2}` : '';
+    parts.push(`👋 saiu do Top 250: ${names}${extra}`);
+  }
+
+  text.textContent = parts.join(' · ') + '. A lista foi atualizada.';
   banner.hidden = false;
 }
 
@@ -347,14 +374,40 @@ function loadWatchedFromStorage(){
   watched = new Set(JSON.parse(localStorage.getItem(STORAGE_WATCHED) || '[]'));
 }
 
-function saveWatched(){
+// Só grava no localStorage e atualiza a barra de progresso — não mexe
+// na nuvem. Usado tanto no modo visitante quanto como cache rápido
+// quando logado (auth.js chama isso depois de sincronizar).
+function persistWatchedLocally(){
   localStorage.setItem(STORAGE_WATCHED, JSON.stringify([...watched]));
   updateProgress();
 }
 
+// Mantido por compatibilidade com o restante do código.
+function saveWatched(){
+  persistWatchedLocally();
+}
+
+// Alterna o estado de "assistido" de um filme: atualiza local na hora
+// (pra UI responder rápido) e, se tiver usuário logado, sincroniza com
+// o Supabase em segundo plano.
+function toggleWatched(ttId){
+  const nowWatched = !watched.has(ttId);
+  if(nowWatched) watched.add(ttId); else watched.delete(ttId);
+  persistWatchedLocally();
+
+  if(typeof currentUser !== 'undefined' && currentUser){
+    const syncPromise = nowWatched ? pushWatchedToCloud(ttId) : removeWatchedFromCloud(ttId);
+    if(syncPromise && syncPromise.catch){
+      syncPromise.catch(e => console.warn('Falha ao sincronizar com a nuvem', e));
+    }
+  }
+  return nowWatched;
+}
+
 function updateProgress(){
   const total = MOVIES.length;
-  const count = watched.size;
+  let count = 0;
+  MOVIES.forEach(m => { if(watched.has(m.ttId)) count++; });
   const pct = total ? Math.round((count/total)*100) : 0;
   document.getElementById('progress-count').textContent = `${count}/${total}`;
   document.getElementById('progress-percent').textContent = `${pct}%`;
@@ -427,13 +480,20 @@ function resetProgress(){
   if(!confirm('Tem certeza que deseja zerar todo o seu progresso? Essa ação não pode ser desfeita.')){
     return;
   }
+  const idsToClear = [...watched];
   watched.clear();
   localStorage.removeItem(STORAGE_COMPLETED);
-  saveWatched();
+  persistWatchedLocally();
   refreshAllGridStates();
   if(currentMovie) applyWatchedState(currentMovie.ttId);
   applyListFilter();
   document.getElementById('completion-modal').hidden = true;
+
+  if(typeof currentUser !== 'undefined' && currentUser){
+    idsToClear.forEach(id => {
+      removeWatchedFromCloud(id).catch(e => console.warn('Falha ao limpar na nuvem', e));
+    });
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -595,8 +655,7 @@ function wireEvents(){
   document.getElementById('watch-btn').addEventListener('click', () => {
     if(!currentMovie) return;
     const tt = currentMovie.ttId;
-    if(watched.has(tt)) watched.delete(tt); else watched.add(tt);
-    saveWatched();
+    toggleWatched(tt);
     applyWatchedState(tt);
     refreshGridItem(tt);
   });
@@ -636,8 +695,7 @@ function wireEvents(){
     const tt = item.dataset.tt;
 
     if(e.target.classList.contains('grid-check')){
-      if(watched.has(tt)) watched.delete(tt); else watched.add(tt);
-      saveWatched();
+      toggleWatched(tt);
       item.classList.toggle('watched', watched.has(tt));
       if(currentMovie && currentMovie.ttId === tt) applyWatchedState(tt);
       applyListFilter();
