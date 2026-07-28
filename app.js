@@ -568,6 +568,8 @@ function renderMovie(movie){
   document.getElementById('mv-year').textContent = movie.year || 'não informado';
   document.getElementById('mv-plot').textContent = smartQuotes(movie.plot);
   document.getElementById('mv-link').href = movie.link || '#';
+  const streamingQuery = encodeURIComponent(movie.title_br || movie.title);
+  document.getElementById('mv-streaming').href = `https://www.justwatch.com/br/busca?q=${streamingQuery}`;
 
   const chipsEl = document.getElementById('mv-genres');
   chipsEl.innerHTML = movie.genres.map(g => `<span class="chip">${g}</span>`).join('');
