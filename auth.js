@@ -4,9 +4,8 @@
 
 // >>> PREENCHA AQUI com os dados do seu projeto Supabase <<<
 // (Supabase Dashboard > Project Settings > API)
-const SUPABASE_URL = 'https://honsugmrdnztbzovzznt.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvbnN1Z21yZG56dGJ6b3Z6em50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NTQ3MDMsImV4cCI6MjEwMDQzMDcwM30.IDne76P9KOMEfUJWsjGUR-4lKdfkJwW3RxpcfxoQ4Z8';
-
+const SUPABASE_URL = 'COLE_A_URL_DO_SEU_PROJETO_AQUI';
+const SUPABASE_ANON_KEY = 'COLE_SUA_CHAVE_ANON_AQUI';
 
 const supabaseClient = (window.supabase && !SUPABASE_URL.startsWith('COLE_'))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -202,24 +201,14 @@ async function removeWatchedFromCloud(ttId){
   if(error) console.warn('Falha ao remover da nuvem:', error);
 }
 
-// Ao logar: busca o progresso salvo na nuvem e mescla com o que já
-// existia localmente (modo visitante), enviando pra nuvem o que faltar.
-async function mergeLocalIntoCloud(){
-  const localIds = [...watched];
+// Ao logar: a nuvem passa a ser a única fonte de verdade do progresso.
+async function loadCloudWatchedIntoState(){
   const cloudIds = await fetchCloudWatched();
-  const cloudSet = new Set(cloudIds);
-
-  const toUpload = localIds.filter(id => !cloudSet.has(id));
-  for(const id of toUpload){
-    await pushWatchedToCloud(id);
-  }
-
-  watched = new Set([...cloudIds, ...localIds]);
-  persistWatchedLocally();
+  watched = new Set(cloudIds);
+  refreshWatchedUI();
   refreshAllGridStates();
   if(currentMovie) applyWatchedState(currentMovie.ttId);
   applyListFilter();
-  updateProgress();
 }
 
 // ---------------------------------------------------------------------
@@ -232,16 +221,16 @@ async function handleAuthChange(session){
       ? session.user.user_metadata.username
       : session.user.email.split('@')[0];
     updateAuthUI();
-    await mergeLocalIntoCloud();
+    await loadCloudWatchedIntoState();
   } else {
     currentUser = null;
     currentUsername = null;
     updateAuthUI();
-    loadWatchedFromStorage();
+    watched = new Set();
+    refreshWatchedUI();
     refreshAllGridStates();
     if(currentMovie) applyWatchedState(currentMovie.ttId);
     applyListFilter();
-    updateProgress();
   }
 }
 
