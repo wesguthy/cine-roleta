@@ -17,10 +17,7 @@ const FALLBACK_MOVIES = [{"rank":1,"title":"The Shawshank Redemption","rating":9
 // acessar imdb.com diretamente por causa das políticas de CORS do site).
 const LIVE_SOURCE_URL = 'https://raw.githubusercontent.com/crazyuploader/IMDb_Top_50/main/data/top250/movies.json';
 
-const STORAGE_WATCHED = 'cineRoletaWatchedByTt_v1';
-const STORAGE_OLD_WATCHED = 'cineRoletaWatched_v1';
 const STORAGE_KNOWN_IDS = 'cineRoletaKnownIds_v1';
-const STORAGE_COMPLETED = 'cineRoletaCompleted_v1';
 
 let MOVIES = [];
 let byTt = {};
@@ -28,6 +25,7 @@ let watched = new Set();
 let currentMovie = null;
 let isSpinning = false;
 let currentFilter = 'all';
+let sessionCompletionCelebrated = false;
 let translationsByTt = {};
 
 // ---------------------------------------------------------------------
@@ -357,49 +355,27 @@ function showUpdateBanner(newMovies, removedMovies){
 // ---------------------------------------------------------------------
 // Progresso / conclusão
 // ---------------------------------------------------------------------
-function migrateOldWatchedIfNeeded(){
-  if(localStorage.getItem(STORAGE_WATCHED)) return;
-  const oldRaw = localStorage.getItem(STORAGE_OLD_WATCHED);
-  if(!oldRaw) return;
-  try{
-    const oldRanks = new Set(JSON.parse(oldRaw));
-    const ttIds = MOVIES.filter(m => oldRanks.has(m.rank)).map(m => m.ttId);
-    if(ttIds.length){
-      localStorage.setItem(STORAGE_WATCHED, JSON.stringify(ttIds));
-    }
-  }catch(e){ /* ignora dado antigo corrompido */ }
-}
-
-function loadWatchedFromStorage(){
-  watched = new Set(JSON.parse(localStorage.getItem(STORAGE_WATCHED) || '[]'));
-}
-
-// Só grava no localStorage e atualiza a barra de progresso — não mexe
-// na nuvem. Usado tanto no modo visitante quanto como cache rápido
-// quando logado (auth.js chama isso depois de sincronizar).
-function persistWatchedLocally(){
-  localStorage.setItem(STORAGE_WATCHED, JSON.stringify([...watched]));
+// O progresso agora vive só na nuvem (por conta logada). Isso apenas
+// atualiza a UI a partir do estado atual em memória.
+function refreshWatchedUI(){
   updateProgress();
 }
 
-// Mantido por compatibilidade com o restante do código.
-function saveWatched(){
-  persistWatchedLocally();
-}
-
-// Alterna o estado de "assistido" de um filme: atualiza local na hora
-// (pra UI responder rápido) e, se tiver usuário logado, sincroniza com
-// o Supabase em segundo plano.
+// Alterna o estado de "assistido" de um filme. Exige login: sem conta,
+// abre o modal de entrar em vez de marcar qualquer coisa.
 function toggleWatched(ttId){
+  if(typeof currentUser === 'undefined' || !currentUser){
+    if(typeof openAuthModal === 'function') openAuthModal('login');
+    return null;
+  }
+
   const nowWatched = !watched.has(ttId);
   if(nowWatched) watched.add(ttId); else watched.delete(ttId);
-  persistWatchedLocally();
+  refreshWatchedUI();
 
-  if(typeof currentUser !== 'undefined' && currentUser){
-    const syncPromise = nowWatched ? pushWatchedToCloud(ttId) : removeWatchedFromCloud(ttId);
-    if(syncPromise && syncPromise.catch){
-      syncPromise.catch(e => console.warn('Falha ao sincronizar com a nuvem', e));
-    }
+  const syncPromise = nowWatched ? pushWatchedToCloud(ttId) : removeWatchedFromCloud(ttId);
+  if(syncPromise && syncPromise.catch){
+    syncPromise.catch(e => console.warn('Falha ao sincronizar com a nuvem', e));
   }
   return nowWatched;
 }
@@ -425,16 +401,15 @@ function handleCompletionState(count, total){
     spinBtn.textContent = '🏆 MARATONA CONCLUÍDA';
     lock.hidden = false;
 
-    const alreadyCelebrated = localStorage.getItem(STORAGE_COMPLETED) === '1';
-    if(!alreadyCelebrated){
-      localStorage.setItem(STORAGE_COMPLETED, '1');
+    if(!sessionCompletionCelebrated){
+      sessionCompletionCelebrated = true;
       celebrateCompletion();
     }
   } else {
     spinBtn.disabled = false;
     spinBtn.textContent = 'GIRAR A ROLETA';
     lock.hidden = true;
-    localStorage.removeItem(STORAGE_COMPLETED);
+    sessionCompletionCelebrated = false;
   }
 }
 
@@ -482,8 +457,8 @@ function resetProgress(){
   }
   const idsToClear = [...watched];
   watched.clear();
-  localStorage.removeItem(STORAGE_COMPLETED);
-  persistWatchedLocally();
+  sessionCompletionCelebrated = false;
+  refreshWatchedUI();
   refreshAllGridStates();
   if(currentMovie) applyWatchedState(currentMovie.ttId);
   applyListFilter();
@@ -748,8 +723,9 @@ async function init(){
   MOVIES = await loadBaseMovies();
   rebuildIndexes();
 
-  migrateOldWatchedIfNeeded();
-  loadWatchedFromStorage();
+  // O progresso (watched) não é mais carregado daqui — ele vem da nuvem
+  // via auth.js assim que a sessão do Supabase for verificada. Sem
+  // login, a lista de assistidos começa vazia.
 
   ['reel-0','reel-1','reel-2'].forEach(buildReel);
   buildGrid();
